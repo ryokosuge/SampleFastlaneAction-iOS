@@ -1,0 +1,151 @@
+# Customise this file, documentation can be found here:
+# https://github.com/fastlane/fastlane/tree/master/fastlane/docs
+# All available actions: https://docs.fastlane.tools/actions
+# can also be listed using the `fastlane actions` command
+
+# Change the syntax highlighting to Ruby
+# All lines starting with a # are ignored when running `fastlane`
+
+# If you want to automatically update fastlane if a new version is available:
+# update_fastlane
+
+# This is the minimum version number required.
+# Update this, if you use features of a newer version
+fastlane_version "2.55.0"
+
+default_platform :ios
+
+platform :ios do
+
+  before_all do
+    # ENV["SLACK_URL"] = "https://hooks.slack.com/services/..."
+  end
+
+  lane :develop do
+    # increment
+    increment_build_number
+
+    # badgeをつける
+    badge
+
+    # Crashlyticsにあげる処理
+    # とかは省略
+
+    # badgeの処理をクリアにするのでreset
+    # badgeはステージのアプリにだけ反映されれば良いのでバージョン管理に含まない
+    # 全てresetする
+    sh("git remote prune origin")
+    sh("git reset --hard HEAD")
+
+    ### release branchを作る or 更新 ###
+    release_branch_name = create_release_branch
+
+    # increment
+    increment_build_number
+
+    # commit
+    commit_version_bump(
+      message: '[ci skip] Version Bump',
+      xcodeproj: 'SampleFastlaneAction'
+    )
+
+    # incrementされた状態でpushする
+    # ENV["TRAVIS_BRANCH"]はTravisCI上で使える環境変数
+    push_to_git_remote(
+      remote_branch: ENV["TRAVIS_BRANCH"],
+      tags: false
+    )
+
+    # create
+    create_pull_request_if_needed(
+      head: ENV["TRAVIS_BRANCH"],
+      base: release_branch_name
+    )
+
+  end
+
+  # --- Private lane ---
+  desc "tag name"
+  private_lane :get_tag_name do |options|
+    version_number = get_version_number(target: "SampleFastlaneAction")
+    "v#{version_number}"
+  end
+
+  desc "Create pull request if it is not made."
+  private_lane :create_pull_request_if_needed do |options|
+    # create
+    head = options[:head]
+    base = options[:base]
+    # ENV["GITHUB_PULL_REQUEST_API_TOKEN"] = "Github Personal API Token"
+    begin
+      create_pull_request(
+        repo: ENV["TRAVIS_REPO_SLUG"],
+        title: "Merging of work until now",
+        head: head,
+        base: base
+      )
+    rescue
+    end
+  end
+
+  desc "create release branch and push remote release branch"
+  private_lane :create_release_branch do |options|
+    # get version number
+    version_number = get_version_number(target: "SampleFastlaneAction")
+    release_branch_name = "release/#{version_number}"
+
+    # checkout release branch
+    checkout(branch: release_branch_name)
+    pull_or_push(branch: release_branch_name)
+    release_branch_name
+  end
+
+  desc "Checkout local branch."
+  desc "If there is no specified branch, create a new one"
+  private_lane :checkout do |options|
+    branch = options[:branch]
+    begin
+      sh("git checkout #{branch}")
+    rescue
+      sh("git checkout -b #{branch}")
+    end
+  end
+
+  esc "Pull remote branch."
+  desc "If not, commit empty and push to Remote branch."
+  private_lane :pull_or_push do |options|
+    branch = options[:branch]
+    begin
+      sh("git pull origin #{branch}")
+    rescue
+      sh("git commit --allow-empty -m \"[ci skip] create new branch\"")
+      push_to_git_remote(local_branch: branch, remote_branch: branch)
+    end
+  end
+
+  # --- Private lane ---
+
+  # You can define as many lanes as you want
+
+  after_all do |lane|
+    # This block is called, only if the executed lane was successful
+
+    # slack(
+    #   message: "Successfully deployed new App Update."
+    # )
+  end
+
+  error do |lane, exception|
+    # slack(
+    #   message: exception.message,
+    #   success: false
+    # )
+  end
+end
+
+
+# More information about multiple platforms in fastlane: https://github.com/fastlane/fastlane/blob/master/fastlane/docs/Platforms.md
+# All available actions: https://docs.fastlane.tools/actions
+
+# fastlane reports which actions are used. No personal data is recorded. 
+# Learn more at https://github.com/fastlane/fastlane#metrics
